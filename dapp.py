@@ -1,39 +1,66 @@
-from os import environ
+import json
 import logging
-import requests
 
-logging.basicConfig(level="INFO")
-logger = logging.getLogger(__name__)
+from cartesi import DApp, Rollup, RollupData, JSONRouter
 
-rollup_server = environ["ROLLUP_HTTP_SERVER_URL"]
-logger.info(f"HTTP rollup_server url is {rollup_server}")
+LOGGER = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
+dapp = DApp()
+json_router = JSONRouter()
+dapp.add_router(json_router)
 
-def handle_advance(data):
-    logger.info(f"Received advance request data {data}")
-    return "accept"
-
-
-def handle_inspect(data):
-    logger.info(f"Received inspect request data {data}")
-    return "accept"
+# This dapp will read and write from this global state dict
+STATE = {}
 
 
-handlers = {
-    "advance_state": handle_advance,
-    "inspect_state": handle_inspect,
-}
+def str2hex(str):
+    """Encodes a string as a hex string"""
+    return "0x" + str.encode("utf-8").hex()
 
-finish = {"status": "accept"}
 
-while True:
-    logger.info("Sending finish")
-    response = requests.post(rollup_server + "/finish", json=finish)
-    logger.info(f"Received finish status {response.status_code}")
-    if response.status_code == 202:
-        logger.info("No pending rollup request, trying again")
+def to_jsonhex(data):
+    """Encode as a JSON hex"""
+    return str2hex(json.dumps(data))
+
+
+@json_router.advance({"op": "set"})
+def handle_advance_set(rollup: Rollup, data: RollupData):
+    data = data.json_payload()
+    key = data['key']
+    value = data['value']
+
+    STATE[key] = value
+
+    rollup.report(to_jsonhex({'key': key, 'value': value}))
+    return True
+
+
+@json_router.advance({"op": "get"})
+def handle_advance_get(rollup: Rollup, data: RollupData):
+    data = data.json_payload()
+    key = data['key']
+
+    if key in STATE:
+        rollup.notice(to_jsonhex({'key': key, 'value': STATE[key]}))
     else:
-        rollup_request = response.json()
-        data = rollup_request["data"]
-        handler = handlers[rollup_request["request_type"]]
-        finish["status"] = handler(rollup_request["data"])
+        rollup.report(to_jsonhex({'key': key, 'error': 'not found'}))
+
+    return True
+
+
+@json_router.inspect({"op": "get"})
+def handle_inspect_get(rollup: Rollup, data: RollupData):
+    data = data.json_payload()
+    key = data['key']
+
+    if key in STATE:
+        rollup.report(to_jsonhex({'key': key, 'value': STATE[key]}))
+    else:
+        rollup.report(to_jsonhex({'key': key, 'error': 'not found'}))
+
+    return True
+
+
+if __name__ == '__main__':
+    dapp.run()
