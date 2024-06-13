@@ -23,6 +23,7 @@ ENV PATH="/opt/cartesi/bin:${PATH}"
 
 WORKDIR /opt/cartesi/dapp
 COPY ./requirements.txt .
+COPY ./auction.py .
 
 RUN <<EOF
 set -e
