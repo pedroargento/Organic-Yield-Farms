@@ -55,7 +55,6 @@ class BidsTest(unittest.TestCase):
         output = BidOutput(Address("alice"), 100, 0)
         expected = [
             Voucher(
-                Address("token_contract"),
                 Operation.TRANSFER,
                 Address("alice"),
                 100,
@@ -69,21 +68,19 @@ class BidsTest(unittest.TestCase):
         output = BidOutput(Address("alice"), 100, 70)
         expected = [
             Voucher(
-                Address("token_contract"),
                 Operation.TRANSFER,
                 Address("alice"),
                 30,
                 False,
             ),
             Voucher(
-                Address("token_contract"),
                 Operation.TRANSFER,
                 Address("alice"),
                 70,
                 True,
             ),
             Voucher(
-                Address("token_contract"), Operation.MINT, Address("alice"), 30, True
+                Operation.MINT, Address("alice"), 30, True
             ),
         ]
         self.assertEqual(set(generate_bid_vouchers(output, price)), set(expected))
@@ -93,21 +90,18 @@ class BidsTest(unittest.TestCase):
         output = BidOutput(Address("alice"), 100, 80)
         expected = [
             Voucher(
-                Address("token_contract"),
                 Operation.TRANSFER,
                 Address("alice"),
                 20,
                 False,
             ),
             Voucher(
-                Address("token_contract"),
                 Operation.TRANSFER,
                 Address("alice"),
                 73,
                 True,
             ),
             Voucher(
-                Address("token_contract"),
                 Operation.BURN,
                 Address("alice"),
                 int(7),
@@ -119,30 +113,26 @@ class BidsTest(unittest.TestCase):
     def test_aggregate_vouchers(self):
         vouchers = [
             Voucher(
-                Address("token_contract"),
-                Operation.TRANSFER,
-                Address("mine_contract"),
+                Operation.BURN,
+                Address("alice"),
                 int(57),
                 True,
             ),
             Voucher(
-                Address("token_contract"),
                 Operation.TRANSFER,
                 Address("alice"),
                 20,
                 False,
             ),
             Voucher(
-                Address("token_contract"),
                 Operation.TRANSFER,
                 Address("alice"),
                 73,
                 True,
             ),
             Voucher(
-                Address("token_contract"),
-                Operation.TRANSFER,
-                Address("mine_contract"),
+                Operation.BURN,
+                Address("alice"),
                 int(7),
                 True,
             ),
@@ -151,21 +141,18 @@ class BidsTest(unittest.TestCase):
         expected = set(
             [
                 Voucher(
-                    Address("token_contract"),
-                    Operation.TRANSFER,
-                    Address("mine_contract"),
+                    Operation.BURN,
+                    Address("alice"),
                     int(64),
                     True,
                 ),
                 Voucher(
-                    Address("token_contract"),
                     Operation.TRANSFER,
                     Address("alice"),
                     20,
                     False,
                 ),
                 Voucher(
-                    Address("token_contract"),
                     Operation.TRANSFER,
                     Address("alice"),
                     73,

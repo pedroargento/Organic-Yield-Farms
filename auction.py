@@ -1,11 +1,11 @@
 from collections.abc import Iterable
-from itertools import accumulate, starmap, chain, groupby
+from enum import IntEnum
+from itertools import accumulate, chain, groupby, starmap
 from typing import NamedTuple, NewType
-from enum import Enum
-
 
 Address = NewType("Address", str)
 PRICE_DECIMALS = 10000
+
 
 class Bid(NamedTuple):
     timestamp: int
@@ -13,13 +13,14 @@ class Bid(NamedTuple):
     price: int
     bidder: Address
 
+
 class Auction(NamedTuple):
     end_time: int
     lock_time: int
     volume_limit: int
     reserve_price: int
     bids: list[Bid]
-    
+
     def new_bid(self, bid: Bid):
         if bid.timestamp <= self.end_time and bid.price >= self.reserve_price:
             self.bids.append(bid)
@@ -38,16 +39,14 @@ class AuctionOutput(NamedTuple):
     sorted_bids: Iterable[Bid]
 
 
-Operation = Enum("Operation", ["TRANSFER", "MINT", "BURN"])
+Operation = IntEnum("Operation", ["TRANSFER", "MINT", "BURN"])
 
 
 class Voucher(NamedTuple):
-    target_contract: Address
     op: Operation
-    to: Address
+    user: Address
     amount: int
     timestamp_locked: bool
-
 
 
 def auction_output(bids: Iterable[Bid], volume_limit: int) -> AuctionOutput:
@@ -74,35 +73,35 @@ def auction_price(output: AuctionOutput) -> int:
 
 
 def generate_bid_vouchers(output: BidOutput, price: int) -> Iterable[Voucher]:
-    decimal_price = price/PRICE_DECIMALS
+    decimal_price = price / PRICE_DECIMALS
     not_fullfiled = int(output.amount_sent - output.amount_fullfiled)
-    mint_amount = int(max((1 - decimal_price) * output.amount_fullfiled // decimal_price, 0))
-    burn_amount = int(max((decimal_price - 1) * output.amount_fullfiled // decimal_price, 0))
+    mint_amount = int(
+        max((1 - decimal_price) * output.amount_fullfiled // decimal_price, 0)
+    )
+    burn_amount = int(
+        max((decimal_price - 1) * output.amount_fullfiled // decimal_price, 0)
+    )
     return_voucher = Voucher(
-        Address("token_contract"),
         Operation.TRANSFER,
         output.bidder,
         not_fullfiled,
         timestamp_locked=False,
     )
     bid_portion_voucher = Voucher(
-        Address("token_contract"),
         Operation.TRANSFER,
-        to=output.bidder,
+        user=output.bidder,
         amount=output.amount_fullfiled - burn_amount,
         timestamp_locked=True,
     )
     mint_voucher = Voucher(
-        Address("token_contract"),
         Operation.MINT,
-        to=output.bidder,
+        user=output.bidder,
         amount=mint_amount,
         timestamp_locked=True,
     )
     burn_voucher = Voucher(
-        Address("token_contract"),
         Operation.BURN,
-        to=output.bidder,
+        user=output.bidder,
         amount=burn_amount,
         timestamp_locked=True,
     )
@@ -118,19 +117,17 @@ def auction_vouchers(outputs: Iterable[BidOutput], price: int) -> Iterable[Vouch
 
 def aggregate_vouchers(vouchers: Iterable[Voucher]) -> Iterable[Voucher]:
     voucher_key = lambda voucher: (
-        voucher.target_contract,
         voucher.op,
-        voucher.to,
+        voucher.user,
         voucher.timestamp_locked,
     )
     sorted_vouchers = sorted(vouchers, key=voucher_key)
     grouped_vouchers = groupby(sorted_vouchers, key=voucher_key)
     return [
         Voucher(
-            target_contract=key[0],
-            op=key[1],
-            to=key[2],
-            timestamp_locked=key[3],
+            op=key[0],
+            user=key[1],
+            timestamp_locked=key[2],
             amount=sum((voucher.amount for voucher in group)),
         )
         for key, group in grouped_vouchers
