@@ -6,8 +6,8 @@ from cartesi.router import DAppAddressRouter
 from cartesi.vouchers import create_voucher_from_model
 from pydantic import BaseModel
 
-from auction import (Auction, Operation, aggregate_vouchers, auction_output,
-                     auction_price, auction_vouchers)
+from auction import (Auction, Bid, Operation, aggregate_vouchers,
+                     auction_output, auction_price, auction_vouchers)
 
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -26,7 +26,7 @@ dapp.add_router(dapp_address)
 dapp.add_router(abi_router)
 
 # This dapp will read and write from this global state dict
-state: dict[str, Auction] = {}
+state: list[Auction] = []
 
 
 def str2hex(str):
@@ -42,7 +42,6 @@ def to_jsonhex(data):
 # Example Json:
 # {
 #    "op": "new-auction",
-#    "id": "key_1",
 #    "end_time": 100,
 #    "lock_time": 200,
 #    "reserve_price": 7000,
@@ -50,15 +49,15 @@ def to_jsonhex(data):
 # }
 @json_router.advance({"op": "new-auction"})
 def handle_new_auction(rollup: Rollup, data: RollupData):
-    metadata = data["metadata"]
     auction_data = data.json_payload()
-    key = auction_data["id"]
-    state[key] = Auction(
-        int(auction_data["end_time"] + metadata["timestamp"]),
-        int(auction_data["lock_time"]),
-        int(auction_data["volume_limit"]),
-        int(auction_data["reserve_price"]),
-        [],
+    state.append(
+        Auction(
+            int(auction_data["end_time"] + data.metadata.timestamp),
+            int(auction_data["lock_time"]),
+            int(auction_data["volume_limit"]),
+            int(auction_data["reserve_price"]),
+            [],
+        )
     )
 
     rollup.report(to_jsonhex(state))
@@ -86,23 +85,27 @@ class BurnArgs(BaseModel):
 # Example Json:
 # {
 #    "op": "end-auction",
-#    "id": "key_1",
+#    "id": 0,
 # }
 @json_router.advance({"op": "end-auction"})
 def handle_end_auction(rollup: Rollup, data: RollupData):
     if dapp_address.address is None:
         return False
-    metadata = data["metadata"]
-    auction_data = data.json_payload()
-    key = auction_data["id"]
-    auction = state[key]
+    payload = data.json_payload()
+    index = payload["id"]
+    auction = state[index]
+
+    if data.metadata.timestamp < auction.end_time:
+        return
 
     output = auction_output(auction.bids, auction.volume_limit)
     price = auction_price(output)
     vouchers = auction_vouchers(output.bid_outputs, price)
     aggregated_vouchers = aggregate_vouchers(vouchers)
     for v in aggregated_vouchers:
-        lock_timestamp = metadata["timestamp"] + auction.lock_time * v.timestamp_locked
+        lock_timestamp = (
+            data.metadata.timestamp + auction.lock_time * v.timestamp_locked
+        )
         if v.op == Operation.BURN:
             voucher = create_voucher_from_model(
                 destination=TOKEN_ADDRESS,
@@ -130,14 +133,39 @@ def handle_end_auction(rollup: Rollup, data: RollupData):
     return True
 
 
+class DepositErc20Payload(BaseModel):
+    token: abi.Address
+    sender: abi.Address
+    depositAmount: abi.UInt256
+    execLayerData: bytes
+
+
+class ExecLayerPayload(BaseModel):
+    auction_id: abi.UInt256
+    price: abi.UInt256
+
+
 @abi_router.advance(msg_sender=ERC20_PORTAL)
 def new_bid(rollup: Rollup, data: RollupData):
-    pass
+    payload = data.bytes_payload()
+    LOGGER.debug("Payload: %s", payload.hex())
+
+    deposit = abi.decode_to_model(data=payload, model=DepositErc20Payload, packed=True)
+    execData = abi.decode_to_model(data=deposit.execLayerData, model=ExecLayerPayload)
+    if deposit.token == TOKEN_ADDRESS:
+        bidder = deposit.sender.lower()
+        volume = deposit.depositAmount
+        price = execData.price
+        auction_id = execData.auction_id
+
+        bid = Bid(data.metadata.timestamp, volume, price, bidder)
+        state[auction_id].new_bid(bid)
+
+    return True
 
 
 @json_router.inspect({"op": "get"})
 def handle_inspect_get(rollup: Rollup, data: RollupData):
-    data = data.json_payload()
     rollup.report(to_jsonhex(state))
 
     return True
