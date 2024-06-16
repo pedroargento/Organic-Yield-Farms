@@ -39,6 +39,10 @@ def to_jsonhex(data):
     return str2hex(json.dumps(data))
 
 
+def state2hex(data):
+    return "0x" + str(data).encode("utf-8").hex()
+
+
 # Example Json:
 # {
 #    "op": "new-auction",
@@ -60,7 +64,7 @@ def handle_new_auction(rollup: Rollup, data: RollupData):
         )
     )
 
-    rollup.report(to_jsonhex(state))
+    rollup.report(state2hex(state))
     return True
 
 
@@ -166,7 +170,14 @@ def new_bid(rollup: Rollup, data: RollupData):
 
 @json_router.inspect({"op": "get"})
 def handle_inspect_get(rollup: Rollup, data: RollupData):
-    rollup.report(to_jsonhex(state))
+    data = data.json_payload()
+    index = int(data['key'])
+    LOGGER.debug("Index: %s", index)
+
+    try:
+            rollup.report(to_jsonhex({'key': index, 'value': state[index]}))
+    except:
+            rollup.report(to_jsonhex({'key': index, 'error': 'not found'}))
 
     return True
 
